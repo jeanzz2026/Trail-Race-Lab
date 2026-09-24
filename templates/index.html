@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trail Race Results</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/feather-icons/dist/feather.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+</head>
+<body>
+    <div class="topo-background">
+        <div class="container py-5">
+            <div class="row justify-content-center">
+                <div class="col-md-12">
+                    <div class="card shadow-lg">
+                        <div class="card-body px-4">
+                            <h1 class="text-center mb-4">🏃‍♂️ Trail Race Results Analyzer</h1>
+                            <p class="text-center text-muted mb-4">
+                                Extract and analyze race results from ITRA (International Trail Running Association)
+                            </p>
+                            
+                            <form id="scrapeForm" class="mb-4">
+                                <div class="input-group">
+                                    <input type="url" class="form-control" id="urlInput" 
+                                           placeholder="Enter ITRA race results URL (e.g., https://itra.run/Races/RaceResults/70K/2024/94006)" required>
+                                    <button class="btn btn-primary" type="submit">
+                                        <i data-feather="search"></i> Get Results
+                                    </button>
+                                </div>
+                                <small class="text-muted">Example: https://itra.run/Races/RaceResults/70K/2024/94006</small>
+                            </form>
+
+                            <div id="loadingSpinner" class="text-center d-none">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <p class="mt-2">Fetching race results...</p>
+                            </div>
+
+                            <div id="errorMessage" class="alert alert-danger d-none"></div>
+
+                            <div id="resultsContainer" class="d-none">
+                                <h3 class="mb-3">Race Results</h3>
+                                <div class="table-responsive">
+                                    <table class="table table-hover">
+                                        <thead>
+                                            <tr>
+                                                <th>Position</th>
+                                                <th>Name</th>
+                                                <th>Time</th>
+                                                <th>Age</th>
+                                                <th>Gender</th>
+                                                <th>Nationality</th>
+                                                <th>ITRA Profile</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="resultsBody"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/feather-icons/dist/feather.min.js"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
