@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from html import escape
 from pathlib import Path
 
 import numpy as np
@@ -28,6 +29,36 @@ def configure_page() -> None:
             background: #ffffff; border: 1px solid #e1e9e4; border-radius: 14px;
             padding: 14px 16px; box-shadow: 0 2px 8px rgba(24, 58, 43, .04);
         }
+        .trl-metric-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(min(100%, 11.5rem), 1fr));
+            gap: .75rem;
+            width: 100%;
+            margin: .35rem 0 .8rem;
+        }
+        .trl-metric-card {
+            min-width: 0;
+            box-sizing: border-box;
+            background: #ffffff;
+            border: 1px solid #e1e9e4;
+            border-radius: 14px;
+            padding: 14px 16px;
+            box-shadow: 0 2px 8px rgba(24, 58, 43, .04);
+        }
+        .trl-metric-label {
+            color: #20342a;
+            font-size: .88rem;
+            line-height: 1.35;
+            margin-bottom: .35rem;
+            overflow-wrap: anywhere;
+        }
+        .trl-metric-value {
+            color: #173127;
+            font-size: clamp(1.45rem, 2.2vw, 2rem);
+            font-variant-numeric: tabular-nums;
+            line-height: 1.2;
+            white-space: nowrap;
+        }
         [data-testid="stForm"] {
             background: #ffffff; border: 1px solid #e1e9e4; border-radius: 16px;
             padding: 1.1rem 1.2rem 1.3rem;
@@ -45,8 +76,31 @@ def configure_page() -> None:
             min-height: 2.75rem; border-radius: 10px; font-weight: 650;
         }
         h1, h2, h3 {letter-spacing: -.02em;}
+        @media (max-width: 760px) {
+            .block-container {padding-left: 1rem; padding-right: 1rem;}
+            .step-row {display: grid; grid-template-columns: 1fr;}
+        }
         </style>
         """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_metric_grid(
+    metrics: list[tuple[str, str, str | None]],
+) -> None:
+    """Render metric cards that wrap before their values become truncated."""
+    cards = []
+    for label, value, help_text in metrics:
+        title = f' title="{escape(help_text, quote=True)}"' if help_text else ""
+        cards.append(
+            f'<div class="trl-metric-card"{title}>'
+            f'<div class="trl-metric-label">{escape(label)}</div>'
+            f'<div class="trl-metric-value">{escape(value)}</div>'
+            "</div>"
+        )
+    st.markdown(
+        '<div class="trl-metric-grid">' + "".join(cards) + "</div>",
         unsafe_allow_html=True,
     )
 
@@ -727,18 +781,20 @@ def render_plan_results(
         elevation_gain_m=summary.elevation_gain_m,
         finish_time=metadata["elapsed_seconds"] / 3600.0,
     )
-    metric1, metric2, metric3, metric4, metric5 = st.columns(5)
-    metric1.metric("预计完赛", format_duration(metadata["elapsed_seconds"]))
-    metric2.metric("移动时间", format_duration(metadata["moving_seconds"]))
-    metric3.metric("计划停留", format_duration(metadata["stop_seconds"]))
-    metric4.metric("累计爬升", f"{summary.elevation_gain_m:,.0f} m")
-    metric5.metric(
-        "预估 Race Score",
-        f"{planned_score.score:.1f}",
-        help=(
-            f"80% 估算区间 {planned_score.lower_80:.1f}–{planned_score.upper_80:.1f}。"
-            "这是仅用赛道参数与预计完赛时间得到的非官方、低置信度估算。"
-        ),
+    render_metric_grid(
+        [
+            ("预计完赛", format_duration(metadata["elapsed_seconds"]), None),
+            ("移动时间", format_duration(metadata["moving_seconds"]), None),
+            ("计划停留", format_duration(metadata["stop_seconds"]), None),
+            ("累计爬升", f"{summary.elevation_gain_m:,.0f} m", None),
+            (
+                "预估 Race Score",
+                f"{planned_score.score:.1f}",
+                f"80% 估算区间 {planned_score.lower_80:.1f}–"
+                f"{planned_score.upper_80:.1f}。这是仅用赛道参数与预计完赛时间"
+                "得到的非官方、低置信度估算。",
+            ),
+        ]
     )
     st.caption(
         f"Race Score 80% 估算区间：{planned_score.lower_80:.1f}–{planned_score.upper_80:.1f}。"
