@@ -1,0 +1,11 @@
+.git
+.gitignore
+.venv
+.uv-cache
+.uv-python
+__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+outputs
+Pasted-*.txt
