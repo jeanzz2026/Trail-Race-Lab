@@ -1,5 +1,6 @@
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -17,11 +18,26 @@ from streamlit_ui import (
     parse_anchor_table,
     parse_duration,
     prepare_results_frame,
+    render_metric_grid,
 )
 from race_score_model import RaceScoreModel
 
 
 class StreamlitUiTests(unittest.TestCase):
+    def test_plan_metric_grid_keeps_full_values_and_escapes_tooltips(self):
+        with patch("streamlit_ui.st.markdown") as markdown:
+            render_metric_grid([
+                ("预计完赛", "12:00:00", None),
+                ("预估 Race Score", "138.9", '区间 < 200 & "非官方"'),
+            ])
+
+        markup = markdown.call_args.args[0]
+        self.assertIn('class="trl-metric-grid"', markup)
+        self.assertIn("12:00:00", markup)
+        self.assertIn("138.9", markup)
+        self.assertIn("&lt; 200 &amp; &quot;非官方&quot;", markup)
+        self.assertTrue(markdown.call_args.kwargs["unsafe_allow_html"])
+
     def test_race_score_model_is_not_stale_cached_across_hot_reload(self):
         first = load_race_score_model()
         second = load_race_score_model()
