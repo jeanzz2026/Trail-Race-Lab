@@ -1,0 +1,129 @@
+{
+  "model_version": "offline-v1",
+  "trained_at": "2026-09-23T03:35:59.513272+00:00",
+  "disclaimer": "Estimated Race Score; not an official ITRA calculation.",
+  "feature_definition": {
+    "km_effort": "distance_km + elevation_gain_m / 100",
+    "vertical_share": "(elevation_gain_m / 100) / km_effort"
+  },
+  "trap_prior": {
+    "race_count": 15195,
+    "result_count": 2878496,
+    "median_absolute_log_residual": 0.10863282904640137,
+    "coefficients": [
+      -3.4716021311533503,
+      1.2216911377684847,
+      -0.2380866120257386
+    ]
+  },
+  "label_data": {
+    "label_count": 48,
+    "event_count": 8,
+    "min_score": 763.0,
+    "max_score": 970.0
+  },
+  "within_race_model": {
+    "formula": "score = anchor_score * anchor_time_hours / finish_time_hours",
+    "metrics": {
+      "mae": 0.956697183262716,
+      "rmse": 1.9528688892718051,
+      "median_absolute_error": 0.31319523187227105,
+      "max_absolute_error": 10.327974276527243,
+      "bias": 0.7996375023905813
+    },
+    "anchor_error_80": 1.4450988852929645,
+    "anchor_error_95": 3.192777777777604,
+    "community_log_baseline": {
+      "mae": 23.85297077466327,
+      "rmse": 28.194115418080944,
+      "median_absolute_error": 29.806499705384226,
+      "max_absolute_error": 47.90551313426295,
+      "bias": 23.85297077466327,
+      "B": 656.380100062246
+    }
+  },
+  "course_model": {
+    "formula": "race_constant = exp(b0 + b1*log(km_effort) + b2*vertical_share)",
+    "coefficients": [
+      3.2126170192699037,
+      1.1795094529863814,
+      -0.08596497827171785
+    ],
+    "ridge_penalty": 0.1,
+    "loo_metrics": {
+      "mae": 34.843920388138734,
+      "rmse": 38.498937553160665,
+      "median_absolute_error": 30.690423185092698,
+      "max_absolute_error": 95.85552025374557,
+      "bias": -25.55734794237163
+    },
+    "loo_error_80": 35.97901909606405,
+    "loo_error_95": 67.68216566767677,
+    "penalty_trials": [
+      {
+        "penalty": 0.1,
+        "mae": 34.843920388138734,
+        "rmse": 38.498937553160665,
+        "median_absolute_error": 30.690423185092698,
+        "max_absolute_error": 95.85552025374557,
+        "bias": -25.55734794237163
+      },
+      {
+        "penalty": 0.3,
+        "mae": 38.555356826340535,
+        "rmse": 41.454190922793664,
+        "median_absolute_error": 34.69763364653784,
+        "max_absolute_error": 94.60284129480681,
+        "bias": -28.589693326757665
+      },
+      {
+        "penalty": 1.0,
+        "mae": 41.775916573181156,
+        "rmse": 43.559009850950765,
+        "median_absolute_error": 39.2968605131457,
+        "max_absolute_error": 87.5836526218028,
+        "bias": -31.85197617473375
+      },
+      {
+        "penalty": 3.0,
+        "mae": 43.770026184277526,
+        "rmse": 45.14972572555498,
+        "median_absolute_error": 41.152021393816426,
+        "max_absolute_error": 79.2394605443867,
+        "bias": -34.24298733475594
+      },
+      {
+        "penalty": 10.0,
+        "mae": 44.83715911586119,
+        "rmse": 46.296629947464886,
+        "median_absolute_error": 42.13711128011215,
+        "max_absolute_error": 73.25574819264239,
+        "bias": -35.63518412524845
+      },
+      {
+        "penalty": 30.0,
+        "mae": 45.199697695590864,
+        "rmse": 46.755211065392494,
+        "median_absolute_error": 43.605867600185604,
+        "max_absolute_error": 74.45955272767105,
+        "bias": -36.12849451709581
+      },
+      {
+        "penalty": 100.0,
+        "mae": 45.33370659475736,
+        "rmse": 46.935318856071085,
+        "median_absolute_error": 44.16656896281762,
+        "max_absolute_error": 74.92692188385013,
+        "bias": -36.31380284397292
+      },
+      {
+        "penalty": 300.0,
+        "mae": 45.372702018401675,
+        "rmse": 46.98887869375696,
+        "median_absolute_error": 44.33164225292171,
+        "max_absolute_error": 75.06456716648165,
+        "bias": -36.36804359750559
+      }
+    ]
+  }
+}
