@@ -1,0 +1,82 @@
+:root {
+    --color-earth: #8B4513;
+    --color-forest: #2F4F4F;
+    --color-stone: #696969;
+    --color-moss: #556B2F;
+    --color-sand: #DEB887;
+}
+
+body {
+    font-family: 'system-ui', -apple-system, sans-serif;
+    background-color: var(--color-sand);
+    color: var(--color-forest);
+    min-height: 100vh;
+}
+
+.container {
+    max-width: 1400px;
+}
+
+.topo-background {
+    background-image: url('../images/topo-pattern.svg');
+    background-size: cover;
+    min-height: 100vh;
+    padding: 2rem 0;
+}
+
+.card {
+    background-color: rgba(255, 255, 255, 0.95);
+    border: none;
+    border-radius: 15px;
+}
+
+h1 {
+    color: var(--color-earth);
+    font-weight: 700;
+    font-size: 2.5rem;
+}
+
+.btn-primary {
+    background-color: var(--color-moss);
+    border-color: var(--color-moss);
+    color: white;
+}
+
+.btn-primary:hover {
+    background-color: var(--color-forest);
+    border-color: var(--color-forest);
+}
+
+.table {
+    background-color: white;
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.table thead th {
+    background-color: var(--color-forest);
+    color: white;
+    border-bottom: none;
+}
+
+.table tbody tr:hover {
+    background-color: rgba(222, 184, 135, 0.1);
+}
+
+.spinner-border {
+    color: var(--color-moss);
+}
+
+.alert {
+    border-radius: 10px;
+}
+
+@media (max-width: 768px) {
+    .container {
+        padding: 1rem;
+    }
+    
+    h1 {
+        font-size: 2rem;
+    }
+}
