@@ -73,14 +73,19 @@ function stopCaptureDelivery() {
 }
 
 async function deliverStoredCapture() {
-  if (location.hostname !== APP_HOST || window !== window.top) return;
+  if (location.hostname !== APP_HOST) return;
   try {
     const { itraCapture } = await chrome.storage.local.get("itraCapture");
     if (!itraCapture) return;
     const message = { source: "trail-race-lab-extension", payload: itraCapture };
+    // Send inside this frame as well as down from the top frame. Injecting the
+    // content script into all Streamlit frames avoids relying on isolated-world
+    // WindowProxy identity across iframe boundaries.
     window.postMessage(message, "*");
-    for (const frame of document.querySelectorAll("iframe")) {
-      frame.contentWindow?.postMessage(message, "*");
+    if (window === window.top) {
+      for (const frame of document.querySelectorAll("iframe")) {
+        frame.contentWindow?.postMessage(message, "*");
+      }
     }
   } catch (error) {
     // Reloading/updating an unpacked extension invalidates scripts that were
@@ -90,6 +95,23 @@ async function deliverStoredCapture() {
     console.debug("Trail Race Lab capture delivery stopped:", String(error));
   }
 }
+
+window.addEventListener("message", (event) => {
+  const message = event.data;
+  if (
+    window !== window.top
+    || !message
+    || message.source !== "trail-race-lab-bridge"
+    || message.type !== "capture-received"
+    || !message.capture_id
+  ) return;
+
+  void chrome.storage.local.get("itraCapture").then(({ itraCapture }) => {
+    if (itraCapture?.capture_id === message.capture_id) {
+      return chrome.storage.local.remove("itraCapture");
+    }
+  }).catch(() => stopCaptureDelivery());
+});
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type !== "CAPTURE_ITRA_RESULTS") return false;
@@ -104,7 +126,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return true;
 });
 
-if (location.hostname === APP_HOST && window === window.top) {
+if (location.hostname === APP_HOST) {
   void deliverStoredCapture();
   deliveryTimerId = setInterval(() => void deliverStoredCapture(), 1000);
 }

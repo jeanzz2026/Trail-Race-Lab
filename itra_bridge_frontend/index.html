@@ -18,13 +18,21 @@
       }
 
       window.addEventListener("message", (event) => {
-        if (event.source !== window.parent) return;
+        if (event.source !== window && event.source !== window.parent) return;
         const message = event.data;
         if (!message || message.source !== "trail-race-lab-extension") return;
         const payload = message.payload;
         if (!payload || !payload.capture_id || payload.capture_id === lastCaptureId) return;
         lastCaptureId = payload.capture_id;
         send("setComponentValue", { value: payload });
+        window.parent.postMessage(
+          {
+            source: "trail-race-lab-bridge",
+            type: "capture-received",
+            capture_id: payload.capture_id,
+          },
+          "*",
+        );
       });
 
       send("componentReady", { apiVersion: 1 });
