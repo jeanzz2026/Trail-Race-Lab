@@ -63,14 +63,31 @@ function parseResults() {
   };
 }
 
+let deliveryTimerId = null;
+
+function stopCaptureDelivery() {
+  if (deliveryTimerId !== null) {
+    clearInterval(deliveryTimerId);
+    deliveryTimerId = null;
+  }
+}
+
 async function deliverStoredCapture() {
   if (location.hostname !== APP_HOST || window !== window.top) return;
-  const { itraCapture } = await chrome.storage.local.get("itraCapture");
-  if (!itraCapture) return;
-  const message = { source: "trail-race-lab-extension", payload: itraCapture };
-  window.postMessage(message, "*");
-  for (const frame of document.querySelectorAll("iframe")) {
-    frame.contentWindow?.postMessage(message, "*");
+  try {
+    const { itraCapture } = await chrome.storage.local.get("itraCapture");
+    if (!itraCapture) return;
+    const message = { source: "trail-race-lab-extension", payload: itraCapture };
+    window.postMessage(message, "*");
+    for (const frame of document.querySelectorAll("iframe")) {
+      frame.contentWindow?.postMessage(message, "*");
+    }
+  } catch (error) {
+    // Reloading/updating an unpacked extension invalidates scripts that were
+    // injected into already-open tabs. Stop this stale timer; refreshing the
+    // page injects the current extension version.
+    stopCaptureDelivery();
+    console.debug("Trail Race Lab capture delivery stopped:", String(error));
   }
 }
 
@@ -88,6 +105,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 if (location.hostname === APP_HOST && window === window.top) {
-  deliverStoredCapture();
-  setInterval(deliverStoredCapture, 1000);
+  void deliverStoredCapture();
+  deliveryTimerId = setInterval(() => void deliverStoredCapture(), 1000);
 }
