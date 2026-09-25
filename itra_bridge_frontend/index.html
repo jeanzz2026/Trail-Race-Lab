@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>ITRA browser bridge</title>
+  </head>
+  <body style="margin:0;min-height:0">
+    <script>
+      const STREAMLIT = "streamlit:";
+      let lastCaptureId = null;
+
+      function send(type, extra = {}) {
+        window.parent.postMessage(
+          { isStreamlitMessage: true, type: STREAMLIT + type, ...extra },
+          "*",
+        );
+      }
+
+      window.addEventListener("message", (event) => {
+        if (event.source !== window.parent) return;
+        const message = event.data;
+        if (!message || message.source !== "trail-race-lab-extension") return;
+        const payload = message.payload;
+        if (!payload || !payload.capture_id || payload.capture_id === lastCaptureId) return;
+        lastCaptureId = payload.capture_id;
+        send("setComponentValue", { value: payload });
+      });
+
+      send("componentReady", { apiVersion: 1 });
+      send("setFrameHeight", { height: 0 });
+    </script>
+  </body>
+</html>

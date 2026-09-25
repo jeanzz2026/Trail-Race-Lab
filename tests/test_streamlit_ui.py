@@ -16,6 +16,7 @@ from streamlit_ui import (
     normalize_gender,
     pace_figure,
     parse_anchor_table,
+    parse_browser_capture,
     parse_duration,
     prepare_results_frame,
     render_metric_grid,
@@ -24,6 +25,37 @@ from race_score_model import RaceScoreModel
 
 
 class StreamlitUiTests(unittest.TestCase):
+    def test_browser_capture_is_validated_and_normalized(self):
+        results, course, capture_id = parse_browser_capture({
+            "schema_version": 1,
+            "capture_id": "capture-123",
+            "source_url": "https://itra.run/Races/RaceResults/example/2026/123",
+            "course_info": {"distance_km": "30.5", "elevation_gain_m": 1400},
+            "results": [{
+                "position": 1,
+                "name": "Runner One",
+                "profile_link": "https://itra.run/RunnerSpace/runner.one",
+                "time": "03:12:34",
+                "age": "35-39",
+                "gender": "M",
+                "nationality": "CHN",
+            }],
+        })
+
+        self.assertEqual(capture_id, "capture-123")
+        self.assertEqual(course, {"distance_km": 30.5, "elevation_gain_m": 1400.0})
+        self.assertEqual(results[0]["position"], "1")
+        self.assertEqual(results[0]["performance_index"], "N/A")
+
+    def test_browser_capture_rejects_non_itra_source(self):
+        with self.assertRaises(ValueError):
+            parse_browser_capture({
+                "schema_version": 1,
+                "capture_id": "capture-123",
+                "source_url": "https://example.com/Races/RaceResults/test",
+                "results": [{"name": "Runner"}],
+            })
+
     def test_plan_metric_grid_keeps_full_values_and_escapes_tooltips(self):
         with patch("streamlit_ui.st.markdown") as markdown:
             render_metric_grid([

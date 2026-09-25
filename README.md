@@ -208,6 +208,27 @@ paths from the web form. No host address or port is hard-coded in
 For Streamlit Community Cloud, set `streamlit_app.py` as the entrypoint; the
 included `requirements.txt` contains the web-app dependencies.
 
+### Browser-assisted ITRA capture
+
+ITRA may challenge requests from shared cloud-server IP addresses. The companion
+Chrome/Edge extension in `browser_extension/` keeps ITRA access in the user's
+verified browser session and sends only normalized race-result fields to the
+Streamlit app. It never transfers ITRA cookies or credentials.
+
+For local extension testing:
+
+1. Open `chrome://extensions` or `edge://extensions`.
+2. Enable **Developer mode** and choose **Load unpacked**.
+3. Select the repository's `browser_extension` directory.
+4. Open an ITRA race-results page and complete any verification shown by ITRA.
+5. When the results table is visible, click the extension and choose
+   **抓取成绩并打开分析**.
+
+The extension is intentionally restricted to ITRA race-results pages and
+`https://trail-race-lab.streamlit.app/`. If the deployed app URL changes, update
+the two matching entries in `browser_extension/manifest.json`, `APP_URL` in
+`service-worker.js`, and `APP_HOST` in `content.js`.
+
 For a container platform:
 
 ```bash

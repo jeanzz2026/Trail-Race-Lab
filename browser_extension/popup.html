@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body { width: 310px; margin: 0; padding: 16px; font: 14px/1.5 system-ui, sans-serif; color: #17382b; }
+      h1 { margin: 0 0 8px; font-size: 17px; }
+      p { margin: 7px 0 12px; color: #52665d; }
+      button { width: 100%; border: 0; border-radius: 9px; padding: 10px 12px; color: white; background: #53732d; font-weight: 650; cursor: pointer; }
+      button:disabled { opacity: .55; cursor: wait; }
+      #status { margin-top: 10px; white-space: pre-wrap; }
+      .error { color: #a33131; }
+      .success { color: #2f6a32; }
+    </style>
+  </head>
+  <body>
+    <h1>Trail Race Lab</h1>
+    <p>请先在当前 ITRA 页面完成人工验证，确认成绩表已经显示。</p>
+    <button id="capture">抓取成绩并打开分析</button>
+    <div id="status" aria-live="polite"></div>
+    <script src="popup.js"></script>
+  </body>
+</html>

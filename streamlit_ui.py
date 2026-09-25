@@ -6,6 +6,7 @@ import hashlib
 import re
 from html import escape
 from pathlib import Path
+from urllib.parse import urlparse
 
 import numpy as np
 import pandas as pd
@@ -15,6 +16,7 @@ import streamlit as st
 
 from race_planner import build_nutrition_plan, build_race_plan, parse_gpx, summarize_course
 from race_score_model import RaceScoreModel
+from itra_bridge import receive_browser_capture
 from scraper import scrape_itra_results
 
 
@@ -182,6 +184,81 @@ def prepare_results_frame(frame: pd.DataFrame) -> pd.DataFrame:
     prepared["gender_label"] = prepared["gender"].apply(normalize_gender)
     prepared["age_group"] = prepared["age"].apply(normalize_age_group)
     return prepared
+
+
+def parse_browser_capture(payload: object) -> tuple[list[dict], dict[str, float], str]:
+    """Validate and normalize an ITRA capture supplied by the browser extension."""
+    if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+        raise ValueError("浏览器扩展数据格式不受支持，请更新扩展。")
+
+    capture_id = str(payload.get("capture_id") or "").strip()
+    source_url = str(payload.get("source_url") or "").strip()
+    parsed_url = urlparse(source_url)
+    if (
+        not capture_id
+        or parsed_url.scheme != "https"
+        or parsed_url.hostname != "itra.run"
+        or not parsed_url.path.lower().startswith("/races/raceresults/")
+    ):
+        raise ValueError("扩展数据不是来自有效的 ITRA 比赛成绩页面。")
+
+    raw_results = payload.get("results")
+    if not isinstance(raw_results, list) or not 1 <= len(raw_results) <= 10000:
+        raise ValueError("扩展数据没有有效成绩，或成绩数量超出限制。")
+
+    fields = (
+        "position", "name", "profile_link", "time", "performance_index",
+        "age", "gender", "nationality",
+    )
+    results: list[dict] = []
+    for raw_row in raw_results:
+        if not isinstance(raw_row, dict):
+            raise ValueError("扩展成绩行格式无效。")
+        row = {field: str(raw_row.get(field, "N/A") or "N/A").strip() for field in fields}
+        if len(row["name"]) > 300 or len(row["profile_link"]) > 1000:
+            raise ValueError("扩展成绩字段长度异常。")
+        results.append(row)
+
+    course_info: dict[str, float] = {}
+    raw_course_info = payload.get("course_info")
+    if isinstance(raw_course_info, dict):
+        for key in ("distance_km", "elevation_gain_m"):
+            value = raw_course_info.get(key)
+            if value is None:
+                continue
+            numeric = float(value)
+            if numeric < 0 or numeric > (1000 if key == "distance_km" else 50000):
+                raise ValueError("扩展读取的赛道参数超出合理范围。")
+            course_info[key] = numeric
+
+    return results, course_info, capture_id
+
+
+def save_results_to_session(
+    results: list[dict],
+    course_info: dict[str, float],
+    *,
+    include_performance_index: bool,
+) -> pd.DataFrame:
+    """Prepare a result set and make it the active Streamlit analysis."""
+    frame = prepare_results_frame(pd.DataFrame(results))
+    if {"distance_km", "elevation_gain_m"}.issubset(course_info):
+        frame = estimate_race_scores(
+            frame,
+            load_race_score_model(),
+            distance_km=float(course_info["distance_km"]),
+            elevation_gain_m=float(course_info["elevation_gain_m"]),
+        )
+        st.session_state["race_score_meta"] = {
+            "mode": "赛道参数模型（ITRA 自动读取）",
+            **course_info,
+        }
+    else:
+        st.session_state.pop("race_score_meta", None)
+    st.session_state["results_frame"] = frame
+    st.session_state["results_course_info"] = course_info
+    st.session_state["results_include_pi"] = include_performance_index
+    return frame
 
 
 def apply_result_filters(
@@ -415,9 +492,12 @@ def render_sidebar() -> str:
     with st.sidebar:
         st.title("Trail Race Lab")
         st.caption("比赛数据、配速与补给规划")
+        requested_page = st.query_params.get("page")
+        default_page_index = 1 if requested_page == "itra" else 0
         page = st.radio(
             "功能",
             ["比赛计划与补给", "ITRA 成绩分析"],
+            index=default_page_index,
             label_visibility="collapsed",
         )
         st.markdown("---")
@@ -435,30 +515,72 @@ def render_sidebar() -> str:
 
 
 def render_results_page() -> None:
+    browser_capture = receive_browser_capture()
+    if browser_capture:
+        incoming_id = str(browser_capture.get("capture_id") or "")
+        if incoming_id and incoming_id != st.session_state.get("browser_capture_id"):
+            try:
+                results, course_info, capture_id = parse_browser_capture(browser_capture)
+                save_results_to_session(
+                    results,
+                    course_info,
+                    include_performance_index=False,
+                )
+                st.session_state["browser_capture_id"] = capture_id
+                st.session_state["browser_capture_count"] = len(results)
+                st.session_state.pop("pending_itra_url", None)
+            except (TypeError, ValueError) as exc:
+                st.session_state["browser_capture_error"] = str(exc)
+
     st.title("ITRA 比赛成绩分析")
     st.caption("抓取公开比赛结果，查看完赛时间、名次、年龄与国籍分布。")
+
+    capture_error = st.session_state.pop("browser_capture_error", None)
+    if capture_error:
+        st.error(f"浏览器扩展数据接收失败：{capture_error}")
+    elif st.session_state.get("browser_capture_count"):
+        st.success(
+            f"已从浏览器接收 {st.session_state['browser_capture_count']:,} 条 ITRA 成绩。"
+        )
+        st.caption("验证和抓取在你的浏览器中完成；Streamlit 只接收成绩字段，不接收 Cookie。")
 
     with st.form("results_query"):
         url = st.text_input(
             "ITRA 比赛结果 URL",
             placeholder="https://itra.run/Races/RaceResults/70K/2024/94006",
         )
+        capture_mode = st.radio(
+            "获取方式",
+            ["浏览器扩展（推荐）", "服务器直接抓取（可能被 ITRA 拦截）"],
+            horizontal=True,
+        )
         option1, option2 = st.columns([1, 1])
         with option1:
             include_pi = st.checkbox(
                 "抓取个人 ITRA Index（较慢）",
                 help="每名选手需要额外访问一次个人页面；Race Score 不是这个数值。",
+                disabled=capture_mode.startswith("浏览器扩展"),
             )
         with option2:
             pi_limit = st.number_input(
                 "最多查询选手数", 1, 200, 50, 10,
-                disabled=not include_pi,
+                disabled=not include_pi or capture_mode.startswith("浏览器扩展"),
             )
-        submitted = st.form_submit_button("分析比赛成绩", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("继续", type="primary", use_container_width=True)
 
     if submitted:
         if not url.strip():
             st.error("请先输入有效的 ITRA 比赛结果 URL。")
+        elif capture_mode.startswith("浏览器扩展"):
+            parsed_url = urlparse(url.strip())
+            if (
+                parsed_url.scheme != "https"
+                or parsed_url.hostname != "itra.run"
+                or not parsed_url.path.lower().startswith("/races/raceresults/")
+            ):
+                st.error("请输入有效的 ITRA 比赛成绩 URL。")
+            else:
+                st.session_state["pending_itra_url"] = url.strip()
         else:
             try:
                 with st.spinner("正在获取比赛结果..."):
@@ -471,25 +593,25 @@ def render_results_page() -> None:
                 if not results:
                     st.warning("没有找到比赛结果，请检查 URL。")
                 else:
-                    frame = prepare_results_frame(pd.DataFrame(results))
-                    if {"distance_km", "elevation_gain_m"}.issubset(course_info):
-                        frame = estimate_race_scores(
-                            frame,
-                            load_race_score_model(),
-                            distance_km=float(course_info["distance_km"]),
-                            elevation_gain_m=float(course_info["elevation_gain_m"]),
-                        )
-                        st.session_state["race_score_meta"] = {
-                            "mode": "仅赛道参数（ITRA 自动读取）",
-                            **course_info,
-                        }
-                    else:
-                        st.session_state.pop("race_score_meta", None)
-                    st.session_state["results_frame"] = frame
-                    st.session_state["results_course_info"] = course_info
-                    st.session_state["results_include_pi"] = include_pi
+                    save_results_to_session(
+                        results,
+                        course_info,
+                        include_performance_index=include_pi,
+                    )
             except Exception as exc:
                 st.error(f"获取失败：{exc}")
+
+    pending_url = st.session_state.get("pending_itra_url")
+    if pending_url:
+        st.info(
+            "点击下方按钮打开 ITRA。如果出现验证，请由你本人完成；看到成绩表后，"
+            "点击浏览器中的 Trail Race Lab 扩展。"
+        )
+        st.link_button(
+            "打开 ITRA 并完成人工验证",
+            pending_url,
+            use_container_width=True,
+        )
 
     frame = st.session_state.get("results_frame")
     if frame is None:
