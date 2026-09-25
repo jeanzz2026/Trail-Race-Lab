@@ -20,6 +20,10 @@ from itra_bridge import receive_browser_capture
 from scraper import scrape_itra_results
 
 
+PLANNER_PAGE = "比赛计划与补给"
+RESULTS_PAGE = "ITRA 成绩分析"
+
+
 def configure_page() -> None:
     st.set_page_config(page_title="Trail Race Lab", page_icon="⛰️", layout="wide")
     st.markdown(
@@ -488,20 +492,49 @@ def load_course(payload: bytes) -> pd.DataFrame:
     return parse_gpx(payload)
 
 
+def receive_and_store_browser_capture() -> None:
+    """Receive extension data without requiring the results page to be active."""
+    browser_capture = receive_browser_capture()
+    if not browser_capture:
+        return
+
+    incoming_id = str(browser_capture.get("capture_id") or "")
+    if not incoming_id or incoming_id == st.session_state.get("browser_capture_id"):
+        return
+
+    try:
+        results, course_info, capture_id = parse_browser_capture(browser_capture)
+        save_results_to_session(
+            results,
+            course_info,
+            include_performance_index=False,
+        )
+        st.session_state["browser_capture_id"] = capture_id
+        st.session_state["browser_capture_count"] = len(results)
+        st.session_state.pop("pending_itra_url", None)
+        # This runs before the sidebar widget is created on every rerun.
+        st.session_state["navigation_page"] = RESULTS_PAGE
+    except (TypeError, ValueError) as exc:
+        st.session_state["browser_capture_error"] = str(exc)
+
+
 def render_sidebar() -> str:
     with st.sidebar:
         st.title("Trail Race Lab")
         st.caption("比赛数据、配速与补给规划")
-        requested_page = st.query_params.get("page")
-        default_page_index = 1 if requested_page == "itra" else 0
+        if "navigation_page" not in st.session_state:
+            requested_page = st.query_params.get("page")
+            st.session_state["navigation_page"] = (
+                RESULTS_PAGE if requested_page == "itra" else PLANNER_PAGE
+            )
         page = st.radio(
             "功能",
-            ["比赛计划与补给", "ITRA 成绩分析"],
-            index=default_page_index,
+            [PLANNER_PAGE, RESULTS_PAGE],
+            key="navigation_page",
             label_visibility="collapsed",
         )
         st.markdown("---")
-        if page == "比赛计划与补给":
+        if page == PLANNER_PAGE:
             st.markdown("**快速流程**")
             st.caption("① 上传 GPX\n\n② 设置时间与站点\n\n③ 生成并下载计划")
             with st.expander("模型说明"):
@@ -515,23 +548,6 @@ def render_sidebar() -> str:
 
 
 def render_results_page() -> None:
-    browser_capture = receive_browser_capture()
-    if browser_capture:
-        incoming_id = str(browser_capture.get("capture_id") or "")
-        if incoming_id and incoming_id != st.session_state.get("browser_capture_id"):
-            try:
-                results, course_info, capture_id = parse_browser_capture(browser_capture)
-                save_results_to_session(
-                    results,
-                    course_info,
-                    include_performance_index=False,
-                )
-                st.session_state["browser_capture_id"] = capture_id
-                st.session_state["browser_capture_count"] = len(results)
-                st.session_state.pop("pending_itra_url", None)
-            except (TypeError, ValueError) as exc:
-                st.session_state["browser_capture_error"] = str(exc)
-
     st.title("ITRA 比赛成绩分析")
     st.caption("抓取公开比赛结果，查看完赛时间、名次、年龄与国籍分布。")
 
@@ -1148,8 +1164,9 @@ def render_planner_page() -> None:
 
 def main() -> None:
     configure_page()
+    receive_and_store_browser_capture()
     page = render_sidebar()
-    if page == "比赛计划与补给":
+    if page == PLANNER_PAGE:
         render_planner_page()
     else:
         render_results_page()

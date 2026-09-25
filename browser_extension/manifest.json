@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Trail Race Lab - ITRA Capture",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Read a verified ITRA results page and send the result table to Trail Race Lab.",
   "permissions": ["activeTab", "storage", "tabs"],
   "host_permissions": [
