@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import re
 import uuid
+import zipfile
 from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
@@ -704,6 +706,25 @@ def load_course(payload: bytes) -> pd.DataFrame:
     return parse_gpx(payload)
 
 
+@st.cache_data(show_spinner=False)
+def build_browser_extension_zip() -> bytes:
+    """Package the deployed companion extension for direct browser download."""
+    extension_root = Path(__file__).resolve().parent / "browser_extension"
+    required = {
+        "manifest.json", "service-worker.js", "content.js", "popup.html", "popup.js",
+    }
+    available = {path.name for path in extension_root.iterdir() if path.is_file()}
+    missing = required - available
+    if missing:
+        raise FileNotFoundError(f"浏览器扩展缺少文件：{', '.join(sorted(missing))}")
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for path in sorted(extension_root.iterdir()):
+            if path.is_file():
+                archive.write(path, arcname=path.name)
+    return output.getvalue()
+
+
 def receive_and_store_browser_capture() -> None:
     """Exchange extension captures and IndexedDB results before rendering navigation."""
     command = st.session_state.pop("browser_storage_command", None)
@@ -822,6 +843,7 @@ def render_sidebar() -> str:
                 )
         else:
             st.caption("输入公开 ITRA 比赛结果链接，抓取并筛选全部完赛记录。")
+            render_saved_races_panel()
     return page
 
 
@@ -851,14 +873,13 @@ def render_saved_races_panel() -> None:
                 format_func=lambda value: labels[value],
                 key="saved_race_selection",
             )
-            load_col, delete_col, refresh_col = st.columns(3)
-            if load_col.button("载入比赛", use_container_width=True):
+            if st.button("载入比赛", use_container_width=True):
                 queue_browser_storage("load", race_id=selected_race_id)
                 st.rerun()
-            if delete_col.button("删除本地记录", use_container_width=True):
+            if st.button("删除本地记录", use_container_width=True):
                 queue_browser_storage("delete", race_id=selected_race_id)
                 st.rerun()
-            if refresh_col.button("刷新列表", use_container_width=True):
+            if st.button("刷新列表", use_container_width=True):
                 queue_browser_storage("list")
                 st.rerun()
         else:
@@ -913,11 +934,53 @@ def render_saved_races_panel() -> None:
                     st.error(f"JSON 备份导入失败：{exc}")
 
 
+def render_extension_setup() -> None:
+    """Offer the companion extension and first-use instructions in the app."""
+    with st.expander("首次使用：下载并安装 Chrome / Edge 扩展"):
+        st.markdown(
+            "ITRA 可能要求真人验证，因此成绩需要由你自己的浏览器读取。"
+            "扩展只发送成绩字段，不发送 Cookie、密码或登录凭据。"
+        )
+        try:
+            extension_zip = build_browser_extension_zip()
+            st.download_button(
+                "下载 Trail Race Lab 浏览器扩展（ZIP）",
+                data=extension_zip,
+                file_name="trail-race-lab-browser-extension.zip",
+                mime="application/zip",
+                type="primary",
+                use_container_width=True,
+                key="download_browser_extension",
+            )
+        except (FileNotFoundError, OSError) as exc:
+            st.error(f"扩展打包失败：{exc}")
+        st.markdown(
+            """
+**Chrome 安装步骤**
+
+1. 下载 ZIP 后，将它解压到一个固定文件夹；Chrome 不能直接加载 ZIP。
+2. 在地址栏打开 `chrome://extensions/`。
+3. 打开右上角的“开发者模式”。
+4. 点击“加载已解压的扩展程序”，选择刚才解压的文件夹。
+5. 建议在扩展菜单中将 **Trail Race Lab - ITRA Capture** 固定到工具栏。
+
+**抓取步骤**
+
+1. 在下方输入 ITRA 比赛结果 URL，选择浏览器扩展模式并点击“分析”。
+2. 打开 ITRA 页面，按页面提示完成人工验证，等待成绩表出现。
+3. 点击浏览器工具栏中的 Trail Race Lab 扩展并抓取成绩。
+4. 返回本页面确认结果；需要长期保留时，再点击侧边栏的“保存 / 覆盖当前比赛”。
+
+Edge 的安装方式相同，扩展管理地址为 `edge://extensions/`。
+            """
+        )
+
+
 def render_results_page() -> None:
     st.title("ITRA 比赛成绩分析")
     st.caption("抓取公开比赛结果，查看完赛时间、名次、年龄与国籍分布。")
 
-    render_saved_races_panel()
+    render_extension_setup()
 
     capture_error = st.session_state.pop("browser_capture_error", None)
     if capture_error:

@@ -1,4 +1,6 @@
 import unittest
+import io
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -8,6 +10,7 @@ from streamlit_ui import (
     add_filtered_ranking,
     age_distribution_figure,
     apply_result_filters,
+    build_browser_extension_zip,
     default_checkpoints,
     estimate_race_scores,
     finish_time_distribution_figure,
@@ -29,6 +32,15 @@ from race_score_model import RaceScoreModel
 
 
 class StreamlitUiTests(unittest.TestCase):
+    def test_browser_extension_download_contains_required_files(self):
+        payload = build_browser_extension_zip()
+        with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+            names = set(archive.namelist())
+        self.assertTrue({
+            "manifest.json", "service-worker.js", "content.js",
+            "popup.html", "popup.js",
+        }.issubset(names))
+
     def test_race_id_is_derived_from_itra_result_url(self):
         self.assertEqual(
             race_id_from_url(

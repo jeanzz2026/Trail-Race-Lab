@@ -224,6 +224,12 @@ For local extension testing:
 5. When the results table is visible, click the extension and choose
    **抓取成绩并打开分析**.
 
+The deployed Streamlit results page also packages the current
+`browser_extension/` directory as a downloadable ZIP and shows Chrome/Edge
+installation instructions. Users must unzip it and load the directory as an
+unpacked extension; Chrome does not install this development build directly
+from the ZIP.
+
 The extension is intentionally restricted to ITRA race-results pages and
 `https://trail-race-lab.streamlit.app/`. If the deployed app URL changes, update
 the two matching entries in `browser_extension/manifest.json`, `APP_URL` in
