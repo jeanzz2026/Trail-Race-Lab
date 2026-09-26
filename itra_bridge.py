@@ -13,6 +13,10 @@ _bridge = components.declare_component(
 )
 
 
-def receive_browser_capture() -> dict | None:
-    """Return the latest browser capture delivered to this Streamlit session."""
-    return _bridge(default=None, key="itra_browser_bridge")
+def receive_browser_capture(command: dict | None = None) -> dict | None:
+    """Exchange extension captures and local-storage commands with the browser."""
+    return _bridge(
+        command=command or {},
+        default=None,
+        key="itra_browser_bridge",
+    )

@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
+import uuid
+from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
 from urllib.parse import urlparse
@@ -22,6 +25,10 @@ from scraper import scrape_itra_results
 
 PLANNER_PAGE = "比赛计划与补给"
 RESULTS_PAGE = "ITRA 成绩分析"
+RESULT_FIELDS = (
+    "position", "name", "profile_link", "time", "performance_index",
+    "age", "gender", "nationality",
+)
 
 
 def configure_page() -> None:
@@ -265,6 +272,147 @@ def save_results_to_session(
     return frame
 
 
+def race_id_from_url(source_url: str) -> str:
+    """Return the stable numeric race identifier from an ITRA results URL."""
+    parsed = urlparse(source_url)
+    parts = [part for part in parsed.path.split("/") if part]
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != "itra.run"
+        or len(parts) < 3
+        or parts[0].lower() != "races"
+        or parts[1].lower() != "raceresults"
+    ):
+        raise ValueError("无效的 ITRA 比赛结果 URL。")
+    return parts[-1]
+
+
+def frame_results_for_backup(frame: pd.DataFrame) -> list[dict]:
+    """Serialize only source result fields, excluding derived chart columns."""
+    records: list[dict] = []
+    for raw in frame.to_dict("records"):
+        record: dict[str, str] = {}
+        for field in RESULT_FIELDS:
+            value = raw.get(field, "N/A")
+            record[field] = "N/A" if pd.isna(value) else str(value)
+        records.append(record)
+    return records
+
+
+def build_current_race_record() -> dict | None:
+    """Build a portable race record from the active analysis session."""
+    frame = st.session_state.get("results_frame")
+    source_url = str(st.session_state.get("results_source_url") or "").strip()
+    if frame is None or not source_url:
+        return None
+    race_id = race_id_from_url(source_url)
+    return {
+        "backup_schema_version": 1,
+        "race_id": race_id,
+        "source_url": source_url,
+        "title": str(st.session_state.get("results_title") or race_id),
+        "captured_at": str(st.session_state.get("results_captured_at") or ""),
+        "saved_at": datetime.now(timezone.utc).isoformat(),
+        "course_info": dict(st.session_state.get("results_course_info") or {}),
+        "results": frame_results_for_backup(frame),
+        "race_score_mode": str(st.session_state.get("race_score_mode") or ""),
+        "race_score_anchors": list(
+            st.session_state.get("race_score_anchor_rows") or []
+        ),
+    }
+
+
+def validate_saved_race_record(payload: object) -> dict:
+    """Validate and normalize an imported or browser-stored race record."""
+    if not isinstance(payload, dict) or payload.get("backup_schema_version") != 1:
+        raise ValueError("备份文件格式不受支持。")
+    source_url = str(payload.get("source_url") or "").strip()
+    race_id = race_id_from_url(source_url)
+    capture_payload = {
+        "schema_version": 1,
+        "capture_id": f"saved-{race_id}",
+        "source_url": source_url,
+        "course_info": payload.get("course_info") or {},
+        "results": payload.get("results"),
+    }
+    results, course_info, _ = parse_browser_capture(capture_payload)
+    anchor_rows = payload.get("race_score_anchors") or []
+    if not isinstance(anchor_rows, list) or len(anchor_rows) > 100:
+        raise ValueError("Race Score 锚点格式无效。")
+    normalized_anchors: list[dict] = []
+    for row in anchor_rows:
+        if not isinstance(row, dict):
+            raise ValueError("Race Score 锚点格式无效。")
+        time_value = str(row.get("finish_time") or "").strip()
+        score_value = row.get("race_score")
+        if not time_value or score_value is None:
+            raise ValueError("Race Score 锚点缺少完赛时间或分数。")
+        parse_duration(time_value)
+        score = float(score_value)
+        if not 1 <= score <= 1000:
+            raise ValueError("Race Score 锚点必须在 1–1000 之间。")
+        normalized_anchors.append({"finish_time": time_value, "race_score": score})
+    return {
+        "backup_schema_version": 1,
+        "race_id": race_id,
+        "source_url": source_url,
+        "title": str(payload.get("title") or race_id)[:500],
+        "captured_at": str(payload.get("captured_at") or "")[:100],
+        "saved_at": str(payload.get("saved_at") or datetime.now(timezone.utc).isoformat()),
+        "course_info": course_info,
+        "results": results,
+        "race_score_mode": str(payload.get("race_score_mode") or "")[:100],
+        "race_score_anchors": normalized_anchors,
+    }
+
+
+def load_saved_race_into_session(record: object) -> dict:
+    """Restore a validated browser/JSON record into the active analysis."""
+    normalized = validate_saved_race_record(record)
+    frame = save_results_to_session(
+        normalized["results"],
+        normalized["course_info"],
+        include_performance_index=False,
+    )
+    anchors = normalized["race_score_anchors"]
+    if anchors:
+        parsed_anchors = parse_anchor_table(pd.DataFrame(anchors))
+        frame = estimate_race_scores(
+            frame,
+            load_race_score_model(),
+            distance_km=1.0,
+            elevation_gain_m=0.0,
+            anchors=parsed_anchors,
+        )
+        calibration = load_race_score_model().calibrate_anchors(parsed_anchors)
+        st.session_state["results_frame"] = frame
+        st.session_state["race_score_meta"] = {
+            "mode": "同场成绩锚点（更高可信度）",
+            "anchor_count": calibration.anchor_count,
+            "anchor_used_count": calibration.used_count,
+            "anchor_rejected_count": calibration.rejected_count,
+            **normalized["course_info"],
+        }
+        st.session_state["race_score_mode"] = "同场成绩锚点（更高可信度）"
+    st.session_state.pop("race_score_anchors", None)
+    st.session_state["race_score_anchor_rows"] = anchors
+    st.session_state["results_source_url"] = normalized["source_url"]
+    st.session_state["results_title"] = normalized["title"]
+    st.session_state["results_captured_at"] = normalized["captured_at"]
+    st.session_state["browser_capture_count"] = len(normalized["results"])
+    st.session_state["navigation_page"] = RESULTS_PAGE
+    return normalized
+
+
+def queue_browser_storage(action: str, **payload: object) -> None:
+    """Queue one IndexedDB command for the browser bridge on the next rerun."""
+    st.session_state["browser_storage_command"] = {
+        "request_id": str(uuid.uuid4()),
+        "action": action,
+        **payload,
+    }
+
+
 def apply_result_filters(
     frame: pd.DataFrame,
     genders: list[str],
@@ -406,9 +554,10 @@ def render_race_score_estimator(
                 unsafe_allow_html=True,
             )
             anchor_table = st.data_editor(
-                pd.DataFrame([
-                    {"finish_time": "10:00:00", "race_score": 700.0},
-                ]),
+                pd.DataFrame(
+                    st.session_state.get("race_score_anchor_rows")
+                    or [{"finish_time": "10:00:00", "race_score": 700.0}]
+                ),
                 num_rows="dynamic",
                 hide_index=True,
                 use_container_width=True,
@@ -480,6 +629,11 @@ def render_race_score_estimator(
                 "distance_km": distance_km,
                 "elevation_gain_m": elevation_gain_m,
             }
+            if anchors is not None:
+                st.session_state["race_score_anchor_rows"] = [
+                    {"finish_time": time_value, "race_score": score_value}
+                    for time_value, score_value in anchors
+                ]
             st.success(f"已为 {estimated['estimated_race_score'].notna().sum():,} 名完赛者生成预估分数。")
             return estimated
         except Exception as exc:
@@ -493,17 +647,45 @@ def load_course(payload: bytes) -> pd.DataFrame:
 
 
 def receive_and_store_browser_capture() -> None:
-    """Receive extension data without requiring the results page to be active."""
-    browser_capture = receive_browser_capture()
-    if not browser_capture:
+    """Exchange extension captures and IndexedDB results before rendering navigation."""
+    command = st.session_state.pop("browser_storage_command", None)
+    if command is None and not st.session_state.get("browser_storage_initialized"):
+        command = {"request_id": str(uuid.uuid4()), "action": "list"}
+        st.session_state["browser_storage_initialized"] = True
+    bridge_value = receive_browser_capture(command)
+    if not isinstance(bridge_value, dict) or not bridge_value:
         return
 
-    incoming_id = str(browser_capture.get("capture_id") or "")
+    if bridge_value.get("bridge_event") == "storage_result":
+        request_id = str(bridge_value.get("request_id") or "")
+        if not request_id or request_id == st.session_state.get("browser_storage_response_id"):
+            return
+        st.session_state["browser_storage_response_id"] = request_id
+        if not bridge_value.get("ok"):
+            st.session_state["browser_storage_error"] = str(
+                bridge_value.get("error") or "浏览器本地存储操作失败。"
+            )
+            return
+        st.session_state["saved_race_catalog"] = list(bridge_value.get("races") or [])
+        action = bridge_value.get("action")
+        if action == "load" and bridge_value.get("record"):
+            loaded = load_saved_race_into_session(bridge_value["record"])
+            st.session_state["browser_storage_flash"] = (
+                f"已载入 {loaded['title']}（{len(loaded['results']):,} 条成绩）。"
+            )
+        elif action == "delete":
+            st.session_state.pop("saved_race_selection", None)
+            st.session_state["browser_storage_flash"] = "已删除浏览器中的比赛记录。"
+        elif action == "save":
+            st.session_state.setdefault("browser_storage_flash", "比赛已保存到当前浏览器。")
+        return
+
+    incoming_id = str(bridge_value.get("capture_id") or "")
     if not incoming_id or incoming_id == st.session_state.get("browser_capture_id"):
         return
 
     try:
-        results, course_info, capture_id = parse_browser_capture(browser_capture)
+        results, course_info, capture_id = parse_browser_capture(bridge_value)
         save_results_to_session(
             results,
             course_info,
@@ -511,9 +693,18 @@ def receive_and_store_browser_capture() -> None:
         )
         st.session_state["browser_capture_id"] = capture_id
         st.session_state["browser_capture_count"] = len(results)
+        st.session_state["results_source_url"] = str(bridge_value.get("source_url") or "")
+        st.session_state["results_title"] = str(bridge_value.get("title") or "")
+        st.session_state["results_captured_at"] = str(bridge_value.get("captured_at") or "")
+        st.session_state["race_score_anchor_rows"] = []
+        st.session_state.pop("race_score_anchors", None)
+        st.session_state.pop("race_score_mode", None)
         st.session_state.pop("pending_itra_url", None)
         # This runs before the sidebar widget is created on every rerun.
         st.session_state["navigation_page"] = RESULTS_PAGE
+        st.session_state["browser_storage_flash"] = (
+            f"已接收 {len(results):,} 条 ITRA 成绩；确认无误后可手动保存。"
+        )
     except (TypeError, ValueError) as exc:
         st.session_state["browser_capture_error"] = str(exc)
 
@@ -547,9 +738,99 @@ def render_sidebar() -> str:
     return page
 
 
+def render_saved_races_panel() -> None:
+    """Render IndexedDB history plus portable JSON import/export controls."""
+    storage_error = st.session_state.pop("browser_storage_error", None)
+    storage_flash = st.session_state.pop("browser_storage_flash", None)
+    if storage_error:
+        st.error(f"浏览器本地存储失败：{storage_error}")
+    if storage_flash:
+        st.success(storage_flash)
+
+    catalog = list(st.session_state.get("saved_race_catalog") or [])
+    with st.expander("已保存比赛与 JSON 备份", expanded=bool(catalog)):
+        if catalog:
+            labels = {
+                str(item.get("race_id")): (
+                    f"{item.get('title') or item.get('race_id')} · "
+                    f"{int(item.get('result_count') or 0):,} 条成绩 · "
+                    f"{int(item.get('anchor_count') or 0)} 个锚点"
+                )
+                for item in catalog
+            }
+            selected_race_id = st.selectbox(
+                "浏览器中保存的比赛",
+                list(labels),
+                format_func=lambda value: labels[value],
+                key="saved_race_selection",
+            )
+            load_col, delete_col, refresh_col = st.columns(3)
+            if load_col.button("载入比赛", use_container_width=True):
+                queue_browser_storage("load", race_id=selected_race_id)
+                st.rerun()
+            if delete_col.button("删除本地记录", use_container_width=True):
+                queue_browser_storage("delete", race_id=selected_race_id)
+                st.rerun()
+            if refresh_col.button("刷新列表", use_container_width=True):
+                queue_browser_storage("list")
+                st.rerun()
+        else:
+            st.caption("当前浏览器还没有保存比赛。首次接收成绩后会自动保存。")
+            if st.button("刷新本地比赛列表"):
+                queue_browser_storage("list")
+                st.rerun()
+
+        current_record = build_current_race_record()
+        if current_record is not None:
+            if st.button(
+                "保存 / 覆盖当前比赛（含 Race Score 锚点）",
+                type="primary",
+                use_container_width=True,
+            ):
+                queue_browser_storage("save", record=current_record)
+                st.session_state["browser_storage_flash"] = (
+                    "已确认保存当前比赛及 Race Score 锚点。"
+                )
+                st.rerun()
+            st.download_button(
+                "导出当前比赛 JSON",
+                data=json.dumps(current_record, ensure_ascii=False, indent=2),
+                file_name=f"itra-race-{current_record['race_id']}.json",
+                mime="application/json",
+                use_container_width=True,
+            )
+
+        with st.form("import_race_backup"):
+            uploaded_backup = st.file_uploader(
+                "导入比赛 JSON 备份",
+                type=["json"],
+                accept_multiple_files=False,
+            )
+            import_backup = st.form_submit_button(
+                "导入并保存到浏览器", use_container_width=True
+            )
+        if import_backup:
+            if uploaded_backup is None:
+                st.error("请先选择 JSON 备份文件。")
+            else:
+                try:
+                    raw_backup = json.loads(uploaded_backup.getvalue().decode("utf-8"))
+                    normalized = load_saved_race_into_session(raw_backup)
+                    normalized["saved_at"] = datetime.now(timezone.utc).isoformat()
+                    queue_browser_storage("save", record=normalized)
+                    st.session_state["browser_storage_flash"] = (
+                        f"已导入 {normalized['title']} 并保存到当前浏览器。"
+                    )
+                    st.rerun()
+                except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+                    st.error(f"JSON 备份导入失败：{exc}")
+
+
 def render_results_page() -> None:
     st.title("ITRA 比赛成绩分析")
     st.caption("抓取公开比赛结果，查看完赛时间、名次、年龄与国籍分布。")
+
+    render_saved_races_panel()
 
     capture_error = st.session_state.pop("browser_capture_error", None)
     if capture_error:
@@ -613,6 +894,15 @@ def render_results_page() -> None:
                         results,
                         course_info,
                         include_performance_index=include_pi,
+                    )
+                    source_url = url.strip()
+                    st.session_state["results_source_url"] = source_url
+                    st.session_state["results_title"] = race_id_from_url(source_url)
+                    st.session_state["results_captured_at"] = datetime.now(timezone.utc).isoformat()
+                    st.session_state["race_score_anchor_rows"] = []
+                    st.session_state.pop("race_score_anchors", None)
+                    st.session_state["browser_storage_flash"] = (
+                        f"已抓取 {len(results):,} 条成绩；确认无误后可手动保存。"
                     )
             except Exception as exc:
                 st.error(f"获取失败：{exc}")

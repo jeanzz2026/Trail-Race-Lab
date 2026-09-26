@@ -8,13 +8,106 @@
   <body style="margin:0;min-height:0">
     <script>
       const STREAMLIT = "streamlit:";
+      const DB_NAME = "trail-race-lab";
+      const STORE_NAME = "itra-races";
       let lastCaptureId = null;
+      let lastCommandId = null;
 
       function send(type, extra = {}) {
         window.parent.postMessage(
           { isStreamlitMessage: true, type: STREAMLIT + type, ...extra },
           "*",
         );
+      }
+
+      function sendValue(value) {
+        send("setComponentValue", { value });
+      }
+
+      function openDatabase() {
+        return new Promise((resolve, reject) => {
+          const request = indexedDB.open(DB_NAME, 1);
+          request.onupgradeneeded = () => {
+            const database = request.result;
+            if (!database.objectStoreNames.contains(STORE_NAME)) {
+              database.createObjectStore(STORE_NAME, { keyPath: "race_id" });
+            }
+          };
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error || new Error("IndexedDB open failed"));
+        });
+      }
+
+      async function runTransaction(mode, operation) {
+        const database = await openDatabase();
+        try {
+          return await new Promise((resolve, reject) => {
+            const transaction = database.transaction(STORE_NAME, mode);
+            const store = transaction.objectStore(STORE_NAME);
+            let result;
+            try {
+              result = operation(store);
+            } catch (error) {
+              reject(error);
+              return;
+            }
+            transaction.oncomplete = () => resolve(result?.result);
+            transaction.onerror = () => reject(transaction.error || new Error("IndexedDB transaction failed"));
+            transaction.onabort = () => reject(transaction.error || new Error("IndexedDB transaction aborted"));
+          });
+        } finally {
+          database.close();
+        }
+      }
+
+      async function listRaces() {
+        const records = await runTransaction("readonly", (store) => store.getAll());
+        return (records || [])
+          .map((record) => ({
+            race_id: record.race_id,
+            title: record.title || record.race_id,
+            source_url: record.source_url || "",
+            captured_at: record.captured_at || "",
+            saved_at: record.saved_at || "",
+            result_count: Array.isArray(record.results) ? record.results.length : 0,
+            anchor_count: Array.isArray(record.race_score_anchors)
+              ? record.race_score_anchors.length
+              : 0,
+          }))
+          .sort((left, right) => String(right.saved_at).localeCompare(String(left.saved_at)));
+      }
+
+      async function handleCommand(command) {
+        if (!command?.request_id || command.request_id === lastCommandId) return;
+        lastCommandId = command.request_id;
+        try {
+          let record = null;
+          if (command.action === "save") {
+            await runTransaction("readwrite", (store) => store.put(command.record));
+          } else if (command.action === "load") {
+            record = await runTransaction("readonly", (store) => store.get(command.race_id));
+          } else if (command.action === "delete") {
+            await runTransaction("readwrite", (store) => store.delete(command.race_id));
+          } else if (command.action !== "list") {
+            throw new Error(`Unsupported storage action: ${command.action}`);
+          }
+          sendValue({
+            bridge_event: "storage_result",
+            request_id: command.request_id,
+            action: command.action,
+            ok: true,
+            record: record || null,
+            races: await listRaces(),
+          });
+        } catch (error) {
+          sendValue({
+            bridge_event: "storage_result",
+            request_id: command.request_id,
+            action: command.action,
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
       }
 
       window.addEventListener("message", (event) => {
@@ -24,7 +117,7 @@
         const payload = message.payload;
         if (!payload || !payload.capture_id || payload.capture_id === lastCaptureId) return;
         lastCaptureId = payload.capture_id;
-        send("setComponentValue", { value: payload });
+        sendValue(payload);
         window.parent.postMessage(
           {
             source: "trail-race-lab-bridge",
@@ -33,6 +126,12 @@
           },
           "*",
         );
+      });
+
+      window.addEventListener("message", (event) => {
+        const message = event.data;
+        if (!message || message.type !== STREAMLIT + "render") return;
+        void handleCommand(message.args?.command || {});
       });
 
       send("componentReady", { apiVersion: 1 });

@@ -10,6 +10,7 @@ from streamlit_ui import (
     apply_result_filters,
     default_checkpoints,
     estimate_race_scores,
+    frame_results_for_backup,
     format_duration,
     load_race_score_model,
     normalize_age_group,
@@ -19,12 +20,51 @@ from streamlit_ui import (
     parse_browser_capture,
     parse_duration,
     prepare_results_frame,
+    race_id_from_url,
+    validate_saved_race_record,
     render_metric_grid,
 )
 from race_score_model import RaceScoreModel
 
 
 class StreamlitUiTests(unittest.TestCase):
+    def test_race_id_is_derived_from_itra_result_url(self):
+        self.assertEqual(
+            race_id_from_url(
+                "https://itra.run/Races/RaceResults/Nike.ACG.Ultra.Trail/2026/117177"
+            ),
+            "117177",
+        )
+
+    def test_backup_record_is_validated_and_keeps_anchors(self):
+        record = validate_saved_race_record({
+            "backup_schema_version": 1,
+            "race_id": "117177",
+            "source_url": "https://itra.run/Races/RaceResults/test/2026/117177",
+            "title": "Test race",
+            "course_info": {"distance_km": 30, "elevation_gain_m": 1500},
+            "results": [{
+                "position": "1", "name": "Runner", "profile_link": "N/A",
+                "time": "03:00:00", "performance_index": "N/A",
+                "age": "35-39", "gender": "M", "nationality": "CHN",
+            }],
+            "race_score_anchors": [
+                {"finish_time": "03:00:00", "race_score": 700},
+            ],
+        })
+        self.assertEqual(record["race_id"], "117177")
+        self.assertEqual(record["race_score_anchors"][0]["race_score"], 700.0)
+
+    def test_backup_frame_excludes_derived_columns(self):
+        frame = prepare_results_frame(pd.DataFrame([{
+            "position": "1", "name": "Runner", "profile_link": "N/A",
+            "time": "03:00:00", "performance_index": "N/A",
+            "age": "35-39", "gender": "M", "nationality": "CHN",
+        }]))
+        record = frame_results_for_backup(frame)[0]
+        self.assertNotIn("time_seconds", record)
+        self.assertEqual(record["performance_index"], "N/A")
+
     def test_browser_capture_is_validated_and_normalized(self):
         results, course, capture_id = parse_browser_capture({
             "schema_version": 1,

@@ -229,6 +229,13 @@ The extension is intentionally restricted to ITRA race-results pages and
 the two matching entries in `browser_extension/manifest.json`, `APP_URL` in
 `service-worker.js`, and `APP_HOST` in `content.js`.
 
+Captured races can be persisted in the browser's IndexedDB from the
+**Saved races and JSON backup** panel. Saving is always explicit: review the
+results and any Race Score anchors, then click **Save / overwrite current
+race**. The same panel can load or delete saved races and export/import a
+portable JSON backup. Browser records stay on the current device and browser
+profile; clearing site data removes them.
+
 For a container platform:
 
 ```bash
