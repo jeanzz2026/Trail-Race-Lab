@@ -25,6 +25,8 @@ from scraper import scrape_itra_results
 
 PLANNER_PAGE = "比赛计划与补给"
 RESULTS_PAGE = "ITRA 成绩分析"
+COURSE_SCORE_MODE = "仅赛道参数（无需账号）"
+ANCHOR_SCORE_MODE = "同场成绩锚点（高置信度）"
 RESULT_FIELDS = (
     "position", "name", "profile_link", "time", "performance_index",
     "age", "gender", "nationality",
@@ -387,13 +389,15 @@ def load_saved_race_into_session(record: object) -> dict:
         calibration = load_race_score_model().calibrate_anchors(parsed_anchors)
         st.session_state["results_frame"] = frame
         st.session_state["race_score_meta"] = {
-            "mode": "同场成绩锚点（更高可信度）",
+            "mode": ANCHOR_SCORE_MODE,
             "anchor_count": calibration.anchor_count,
             "anchor_used_count": calibration.used_count,
             "anchor_rejected_count": calibration.rejected_count,
             **normalized["course_info"],
         }
-        st.session_state["race_score_mode"] = "同场成绩锚点（更高可信度）"
+        st.session_state["race_score_mode"] = ANCHOR_SCORE_MODE
+    else:
+        st.session_state["race_score_mode"] = COURSE_SCORE_MODE
     st.session_state.pop("race_score_anchors", None)
     st.session_state["race_score_anchor_rows"] = anchors
     st.session_state["results_source_url"] = normalized["source_url"]
@@ -538,14 +542,17 @@ def render_race_score_estimator(
     st.caption(
         "这是单场比赛表现分的离线估算，不是选手个人 ITRA Index，也不是 ITRA 官方出分。"
     )
+    score_modes = [COURSE_SCORE_MODE, ANCHOR_SCORE_MODE]
+    if st.session_state.get("race_score_mode") not in score_modes:
+        # Migrate invalid values written by older saved-race builds.
+        st.session_state["race_score_mode"] = COURSE_SCORE_MODE
     mode = st.segmented_control(
         "估算方式",
-        ["仅赛道参数（无需账号）", "同场成绩锚点（高置信度）"],
-        default="仅赛道参数（无需账号）",
+        score_modes,
         key="race_score_mode",
     )
     with st.form("race_score_estimator"):
-        if mode == "同场成绩锚点（高置信度）":
+        if mode == ANCHOR_SCORE_MODE:
             st.markdown(
                 '<div class="section-note"><b>高置信度</b><br>'
                 '可输入同一场比赛多位选手的官方 Race Score 与对应完赛时间。'
@@ -607,7 +614,7 @@ def render_race_score_estimator(
 
     if calculate:
         try:
-            if mode == "同场成绩锚点（高置信度）":
+            if mode == ANCHOR_SCORE_MODE:
                 anchors = parse_anchor_table(anchor_table)
             estimated = estimate_race_scores(
                 frame,
