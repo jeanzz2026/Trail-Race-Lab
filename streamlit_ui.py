@@ -462,6 +462,57 @@ def age_distribution_figure(frame: pd.DataFrame, age_order: list[str]) -> go.Fig
     return figure
 
 
+def finish_time_distribution_figure(frame: pd.DataFrame) -> go.Figure:
+    """Create a full-width binned finish-time distribution curve."""
+    source = frame["finish_hours"] if "finish_hours" in frame else pd.Series(dtype=float)
+    values = pd.to_numeric(source, errors="coerce").dropna()
+    figure = go.Figure()
+    if values.empty:
+        figure.update_layout(
+            title="完赛时间分布",
+            xaxis_title="完赛时间（小时）",
+            yaxis_title="人数",
+        )
+        return figure
+
+    bin_count = max(1, min(40, int(np.ceil(np.sqrt(len(values))))))
+    minimum = float(values.min())
+    maximum = float(values.max())
+    if minimum == maximum:
+        padding = max(0.25, minimum * 0.01)
+        edges = np.array([minimum - padding, maximum + padding])
+        counts = np.array([len(values)])
+    else:
+        counts, edges = np.histogram(values.to_numpy(), bins=bin_count)
+    centers = (edges[:-1] + edges[1:]) / 2
+    ranges = [
+        f"{format_duration(left * 3600)}–{format_duration(right * 3600)}"
+        for left, right in zip(edges[:-1], edges[1:])
+    ]
+    figure.add_trace(go.Scatter(
+        x=centers,
+        y=counts,
+        customdata=ranges,
+        mode="lines+markers",
+        line={"shape": "spline", "width": 3, "color": "#557A2E"},
+        marker={"size": 6, "color": "#557A2E"},
+        fill="tozeroy",
+        fillcolor="rgba(85, 122, 46, 0.16)",
+        hovertemplate="%{customdata}<br>人数：%{y}<extra></extra>",
+        name="完赛人数",
+    ))
+    figure.update_layout(
+        title="完赛时间分布",
+        xaxis_title="完赛时间（小时）",
+        yaxis_title="人数",
+        showlegend=False,
+        hovermode="x",
+    )
+    figure.update_xaxes(tickformat=".1f")
+    figure.update_yaxes(tickformat="d", rangemode="tozero")
+    return figure
+
+
 def load_race_score_model() -> RaceScoreModel:
     # Keep this uncached: Streamlit can otherwise retain an instance created
     # from an older RaceScoreModel class after a hot reload.
@@ -1028,11 +1079,9 @@ def render_results_page() -> None:
             st.plotly_chart(
                 age_distribution_figure(filtered, ages), use_container_width=True
             )
-            st.caption(
-                "每个年龄组按性别累计显示：蓝色为男子、粉色为女子；"
-                "只统计同时具有有效年龄组和标准 M/F 性别的记录，"
-                "不需要额外抓取个人 ITRA Index。"
-            )
+        st.plotly_chart(
+            finish_time_distribution_figure(filtered), use_container_width=True
+        )
         index_frame = filtered.dropna(subset=["time_seconds", "performance_index"])
         if not index_frame.empty:
             fig = px.scatter(

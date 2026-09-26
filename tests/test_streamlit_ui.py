@@ -10,6 +10,7 @@ from streamlit_ui import (
     apply_result_filters,
     default_checkpoints,
     estimate_race_scores,
+    finish_time_distribution_figure,
     frame_results_for_backup,
     format_duration,
     load_race_score_model,
@@ -147,6 +148,14 @@ class StreamlitUiTests(unittest.TestCase):
         figure = pace_figure(plan, "折线图")
         self.assertEqual(figure.data[0].line.shape, "spline")
         self.assertEqual(list(figure.data[0].text), ["7.13", "9.88"])
+
+    def test_finish_time_distribution_curve_counts_all_valid_finishers(self):
+        frame = pd.DataFrame({"finish_hours": [3.0, 3.5, 4.0, 5.0, None]})
+        figure = finish_time_distribution_figure(frame)
+        self.assertEqual(sum(figure.data[0].y), 4)
+        self.assertEqual(figure.data[0].line.shape, "spline")
+        self.assertEqual(figure.layout.xaxis.title.text, "完赛时间（小时）")
+        self.assertEqual(figure.layout.yaxis.title.text, "人数")
 
     def test_result_labels_preserve_itra_age_groups(self):
         self.assertEqual(normalize_age_group("23-34"), "23-34")
