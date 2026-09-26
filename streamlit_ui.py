@@ -662,10 +662,27 @@ def receive_and_store_browser_capture() -> None:
     bridge_value = receive_browser_capture(command)
     if not isinstance(bridge_value, dict) or not bridge_value:
         return
+    # Let this run finish so the clear command reaches the component. The
+    # component will replace its large value and trigger the next rerun.
+    if isinstance(command, dict) and command.get("action") == "clear":
+        return
+    if bridge_value.get("bridge_event") == "bridge_cleared":
+        return
 
     if bridge_value.get("bridge_event") == "storage_result":
         request_id = str(bridge_value.get("request_id") or "")
-        if not request_id or request_id == st.session_state.get("browser_storage_response_id"):
+        if not request_id:
+            return
+        is_duplicate = request_id == st.session_state.get("browser_storage_response_id")
+        if is_duplicate:
+            if (
+                bridge_value.get("action") == "load"
+                and bridge_value.get("record")
+                and request_id != st.session_state.get("browser_bridge_cleared_load_id")
+            ):
+                st.session_state["browser_bridge_cleared_load_id"] = request_id
+                queue_browser_storage("clear")
+                st.rerun()
             return
         st.session_state["browser_storage_response_id"] = request_id
         if not bridge_value.get("ok"):
@@ -680,6 +697,9 @@ def receive_and_store_browser_capture() -> None:
             st.session_state["browser_storage_flash"] = (
                 f"已载入 {loaded['title']}（{len(loaded['results']):,} 条成绩）。"
             )
+            st.session_state["browser_bridge_cleared_load_id"] = request_id
+            queue_browser_storage("clear")
+            st.rerun()
         elif action == "delete":
             st.session_state.pop("saved_race_selection", None)
             st.session_state["browser_storage_flash"] = "已删除浏览器中的比赛记录。"
@@ -688,7 +708,13 @@ def receive_and_store_browser_capture() -> None:
         return
 
     incoming_id = str(bridge_value.get("capture_id") or "")
-    if not incoming_id or incoming_id == st.session_state.get("browser_capture_id"):
+    if not incoming_id:
+        return
+    if incoming_id == st.session_state.get("browser_capture_id"):
+        if incoming_id != st.session_state.get("browser_bridge_cleared_capture_id"):
+            st.session_state["browser_bridge_cleared_capture_id"] = incoming_id
+            queue_browser_storage("clear")
+            st.rerun()
         return
 
     try:
@@ -712,6 +738,9 @@ def receive_and_store_browser_capture() -> None:
         st.session_state["browser_storage_flash"] = (
             f"已接收 {len(results):,} 条 ITRA 成绩；确认无误后可手动保存。"
         )
+        st.session_state["browser_bridge_cleared_capture_id"] = incoming_id
+        queue_browser_storage("clear")
+        st.rerun()
     except (TypeError, ValueError) as exc:
         st.session_state["browser_capture_error"] = str(exc)
 
