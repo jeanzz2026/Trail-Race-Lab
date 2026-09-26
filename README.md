@@ -237,8 +237,8 @@ the two matching entries in `browser_extension/manifest.json`, `APP_URL` in
 
 Captured races can be persisted in the browser's IndexedDB from the
 **Saved races and JSON backup** panel. Saving is always explicit: review the
-results and any Race Score anchors, then click **Save / overwrite current
-race**. The same panel can load or delete saved races and export/import a
+results and either the Race Score anchors or course parameters, then click
+**Save / overwrite current race**. The same panel can load or delete saved races and export/import a
 portable JSON backup. Browser records stay on the current device and browser
 profile; clearing site data removes them.
 

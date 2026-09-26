@@ -68,6 +68,31 @@ class StreamlitUiTests(unittest.TestCase):
         self.assertEqual(record["race_id"], "117177")
         self.assertEqual(record["race_score_anchors"][0]["race_score"], 700.0)
 
+    def test_backup_restores_manual_course_parameters(self):
+        record = validate_saved_race_record({
+            "backup_schema_version": 1,
+            "race_id": "117177",
+            "source_url": "https://itra.run/Races/RaceResults/test/2026/117177",
+            "title": "Test race",
+            "course_info": {},
+            "results": [{
+                "position": "1", "name": "Runner", "profile_link": "N/A",
+                "time": "03:00:00", "performance_index": "N/A",
+                "age": "35-39", "gender": "M", "nationality": "CHN",
+            }],
+            "race_score_mode": "仅赛道参数（无需账号）",
+            "race_score_parameters": {
+                "distance_km": 30.5,
+                "elevation_gain_m": 1600,
+            },
+            "race_score_anchors": [],
+        })
+        self.assertEqual(
+            record["course_info"],
+            {"distance_km": 30.5, "elevation_gain_m": 1600.0},
+        )
+        self.assertEqual(record["race_score_parameters"], record["course_info"])
+
     def test_backup_frame_excludes_derived_columns(self):
         frame = prepare_results_frame(pd.DataFrame([{
             "position": "1", "name": "Runner", "profile_link": "N/A",

@@ -310,6 +310,17 @@ def build_current_race_record() -> dict | None:
     if frame is None or not source_url:
         return None
     race_id = race_id_from_url(source_url)
+    course_info = dict(st.session_state.get("results_course_info") or {})
+    score_mode = str(st.session_state.get("race_score_mode") or "")
+    score_parameters: dict[str, float] = {}
+    if score_mode == COURSE_SCORE_MODE:
+        score_meta = dict(st.session_state.get("race_score_meta") or {})
+        for key in ("distance_km", "elevation_gain_m"):
+            value = score_meta.get(key, course_info.get(key))
+            if value is not None:
+                score_parameters[key] = float(value)
+        if {"distance_km", "elevation_gain_m"}.issubset(score_parameters):
+            course_info.update(score_parameters)
     return {
         "backup_schema_version": 1,
         "race_id": race_id,
@@ -317,9 +328,10 @@ def build_current_race_record() -> dict | None:
         "title": str(st.session_state.get("results_title") or race_id),
         "captured_at": str(st.session_state.get("results_captured_at") or ""),
         "saved_at": datetime.now(timezone.utc).isoformat(),
-        "course_info": dict(st.session_state.get("results_course_info") or {}),
+        "course_info": course_info,
         "results": frame_results_for_backup(frame),
-        "race_score_mode": str(st.session_state.get("race_score_mode") or ""),
+        "race_score_mode": score_mode,
+        "race_score_parameters": score_parameters,
         "race_score_anchors": list(
             st.session_state.get("race_score_anchor_rows") or []
         ),
@@ -340,6 +352,19 @@ def validate_saved_race_record(payload: object) -> dict:
         "results": payload.get("results"),
     }
     results, course_info, _ = parse_browser_capture(capture_payload)
+    raw_parameters = payload.get("race_score_parameters") or {}
+    score_parameters: dict[str, float] = {}
+    if isinstance(raw_parameters, dict):
+        for key in ("distance_km", "elevation_gain_m"):
+            value = raw_parameters.get(key)
+            if value is not None:
+                numeric = float(value)
+                limit = 1000 if key == "distance_km" else 50000
+                if numeric < 0 or numeric > limit:
+                    raise ValueError("保存的赛道参数超出合理范围。")
+                score_parameters[key] = numeric
+    if {"distance_km", "elevation_gain_m"}.issubset(score_parameters):
+        course_info.update(score_parameters)
     anchor_rows = payload.get("race_score_anchors") or []
     if not isinstance(anchor_rows, list) or len(anchor_rows) > 100:
         raise ValueError("Race Score 锚点格式无效。")
@@ -366,6 +391,7 @@ def validate_saved_race_record(payload: object) -> dict:
         "course_info": course_info,
         "results": results,
         "race_score_mode": str(payload.get("race_score_mode") or "")[:100],
+        "race_score_parameters": score_parameters,
         "race_score_anchors": normalized_anchors,
     }
 
@@ -405,6 +431,7 @@ def load_saved_race_into_session(record: object) -> dict:
     st.session_state["results_source_url"] = normalized["source_url"]
     st.session_state["results_title"] = normalized["title"]
     st.session_state["results_captured_at"] = normalized["captured_at"]
+    st.session_state["race_score_parameters"] = normalized["race_score_parameters"]
     st.session_state["browser_capture_count"] = len(normalized["results"])
     st.session_state["navigation_page"] = RESULTS_PAGE
     return normalized
@@ -641,8 +668,8 @@ def render_race_score_estimator(
                 distance_km = float(course_info["distance_km"])
                 elevation_gain_m = float(course_info["elevation_gain_m"])
                 st.success(
-                    f"已从 ITRA 赛事详情自动读取：{distance_km:.2f} km / "
-                    f"D+ {elevation_gain_m:.0f} m，无需手动输入。"
+                    f"当前赛道参数：{distance_km:.2f} km / "
+                    f"D+ {elevation_gain_m:.0f} m。"
                 )
             else:
                 st.warning(
@@ -689,6 +716,13 @@ def render_race_score_estimator(
                 "distance_km": distance_km,
                 "elevation_gain_m": elevation_gain_m,
             }
+            st.session_state["race_score_parameters"] = (
+                {
+                    "distance_km": float(distance_km),
+                    "elevation_gain_m": float(elevation_gain_m),
+                }
+                if anchors is None else {}
+            )
             if anchors is not None:
                 st.session_state["race_score_anchor_rows"] = [
                     {"finish_time": time_value, "race_score": score_value}
@@ -802,6 +836,7 @@ def receive_and_store_browser_capture() -> None:
         st.session_state["results_title"] = str(bridge_value.get("title") or "")
         st.session_state["results_captured_at"] = str(bridge_value.get("captured_at") or "")
         st.session_state["race_score_anchor_rows"] = []
+        st.session_state["race_score_parameters"] = dict(course_info)
         st.session_state.pop("race_score_anchors", None)
         st.session_state.pop("race_score_mode", None)
         st.session_state.pop("pending_itra_url", None)
@@ -1050,6 +1085,7 @@ def render_results_page() -> None:
                     st.session_state["results_title"] = race_id_from_url(source_url)
                     st.session_state["results_captured_at"] = datetime.now(timezone.utc).isoformat()
                     st.session_state["race_score_anchor_rows"] = []
+                    st.session_state["race_score_parameters"] = dict(course_info)
                     st.session_state.pop("race_score_anchors", None)
                     st.session_state["browser_storage_flash"] = (
                         f"已抓取 {len(results):,} 条成绩；确认无误后可手动保存。"
